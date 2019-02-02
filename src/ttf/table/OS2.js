@@ -140,9 +140,12 @@ define(
                     var maxCompositeContours = 0;
                     var maxSizeOfInstructions = 0;
                     var maxComponentElements = 0;
-
+                    
                     var glyfNotEmpty = 0; // 非空glyf
                     var hinting = ttf.writeOptions ? ttf.writeOptions.hinting : false;
+
+                    let hasGlyfInSuppPUA = false;
+                    let hasGlyfInPUA = false;
 
                     // 计算instructions和functiondefs
                     if (hinting) {
@@ -237,7 +240,11 @@ define(
 
                         if (Array.isArray(unicodes)) {
                             unicodes.forEach(function (unicode) {
-                                if (unicode !== 0xFFFF) {
+                                if (unicode > 0xFFFF) {
+                                    hasGlyfInSuppPUA = true;
+                                }
+                                if (unicode !== 0xFFFF && unicode <= 0xFFFF) {
+                                    hasGlyfInPUA = true;
                                     usFirstCharIndex = Math.min(usFirstCharIndex, unicode);
                                     usLastCharIndex = Math.max(usLastCharIndex, unicode);
                                 }
@@ -245,11 +252,30 @@ define(
                         }
                     });
 
+                    // Following numbers when converted to binary are toggling specific bits
+                    // to represent the range of codepoints allocated to the subset
+                    const RANGE_FOR_SPUA_AND_PUA = 301989888; // bits #60 (PUA) and #57(SPUA) are set.
+                    const RANGE_FOR_SPUA_ONLY = 33554432; // bit #60 (PUA) is clear and bit #57(SPUA) is set.
+                    const RANGE_FOR_PUA_ONLY = 268435456; // bit #60 (PUA) is set and bit #57(SPUA) is clear.
+
+                    let ulUnicodeRange2 = 0; // bits #60 (PUA) and #57(SPUA) are clear.
+                    if (hasGlyfInSuppPUA && hasGlyfInPUA) {
+                        ulUnicodeRange2 = RANGE_FOR_SPUA_AND_PUA;
+                    } else if (hasGlyfInSuppPUA && !hasGlyfInPUA) {
+                        ulUnicodeRange2 = RANGE_FOR_SPUA_ONLY;
+                        // According to the documentation in the links below we set these values to the last possible index in the PUA
+                        // If we don't do this we have are corrupting the font with incorrect values.
+                        usFirstCharIndex = 0xFFFF; // https://docs.microsoft.com/en-us/typography/opentype/spec/os2#usfirstcharindex
+                        usLastCharIndex = 0xFFFF; // https://docs.microsoft.com/en-us/typography/opentype/spec/os2#uslastcharindex
+                    } else if (!hasGlyfInSuppPUA && hasGlyfInPUA) {
+                        ulUnicodeRange2 = RANGE_FOR_PUA_ONLY;
+                    }
+
                     // 重新设置version 4
                     ttf['OS/2'].version = 0x4;
                     ttf['OS/2'].achVendID = (ttf['OS/2'].achVendID + '    ').slice(0, 4);
                     ttf['OS/2'].xAvgCharWidth = xAvgCharWidth / (glyfNotEmpty || 1);
-                    ttf['OS/2'].ulUnicodeRange2 = 268435456;
+                    ttf['OS/2'].ulUnicodeRange2 = ulUnicodeRange2;
                     ttf['OS/2'].usFirstCharIndex = usFirstCharIndex;
                     ttf['OS/2'].usLastCharIndex = usLastCharIndex;
 
